@@ -7,3 +7,5 @@ To run thttpd:
 sudo ./thttpd
 To run in the foreground:
 sudo ./thttpd -D
+
+You can test it by going to http://127.0.0.1
