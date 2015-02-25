@@ -1,0 +1,5 @@
+Notes to me/anyone else:
+To run thttpd:
+sudo ./thttpd -h 127.0.0.1
+To run in the foreground:
+sudo ./thttpd -h 127.0.0.1 -D
