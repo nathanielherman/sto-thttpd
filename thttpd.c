@@ -70,6 +70,8 @@
 typedef long long int64_t;
 #endif
 
+// TODO: put this in the Makefile
+#define THREADS 1
 
 static char* argv0;
 static int debug;
@@ -720,6 +722,21 @@ main( int argc, char** argv )
                 "started as root without requesting chroot(), warning only" );
         }
 
+#if THREADS
+
+    pthread_t pt1, pt2;
+    int r = pthread_create(&pt1, NULL, web_thread, NULL);
+    int r2 = pthread_create(&pt2, NULL, web_thread, NULL);
+    if (r != 0 || r2 != 0) {
+      perror("pthread_create failed");
+      exit(1);
+    }
+
+    while(1) sleep(1000);
+
+
+#else
+
     /* Initialize our connections table. */
     connects = NEW( connecttab, max_connects );
     if ( connects == (connecttab*) 0 )
@@ -738,17 +755,7 @@ main( int argc, char** argv )
     num_connects = 0;
     httpd_conn_count = 0;
 
-    pthread_t pt1, pt2;
-    int r = pthread_create(&pt1, NULL, web_thread, NULL);
-    int r2 = pthread_create(&pt2, NULL, web_thread, NULL);
-    if (r != 0 || r2 != 0) {
-      perror("pthread_create failed");
-      exit(1);
-    }
 
-    while(1) sleep(1000);
-
-#if 0
     if ( hs != (httpd_server*) 0 )
         {
         if ( hs->listen4_fd != -1 )
