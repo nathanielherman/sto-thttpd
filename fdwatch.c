@@ -70,11 +70,11 @@
 #endif /* !FD_SET */
 #endif /* HAVE_SELECT */
 
-static int nfiles;
-static long nwatches;
-static int* fd_rw;
-static void** fd_data;
-static int nreturned, next_ridx;
+static __thread int nfiles;
+static __thread long nwatches;
+static __thread int* fd_rw;
+static __thread void** fd_data;
+static __thread int nreturned, next_ridx;
 
 #ifdef HAVE_KQUEUE
 
@@ -547,10 +547,10 @@ devpoll_get_fd( int ridx )
 
 #  ifdef HAVE_POLL
 
-static struct pollfd* pollfds;
-static int npoll_fds;
-static int* poll_fdidx;
-static int* poll_rfdidx;
+static __thread struct pollfd* pollfds;
+static __thread int npoll_fds;
+static __thread int* poll_fdidx;
+static __thread int* poll_rfdidx;
 
 
 static int

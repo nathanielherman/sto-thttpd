@@ -36,6 +36,8 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 
+#include <pthread.h>
+
 #include <errno.h>
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
@@ -118,9 +120,10 @@ typedef struct {
     off_t end_byte_index;
     off_t next_byte_index;
     } connecttab;
-static connecttab* connects;
-static int num_connects, max_connects, first_free_connect;
-static int httpd_conn_count;
+static __thread connecttab* connects;
+static __thread int num_connects, first_free_connect;
+static int max_connects; // constant, so not per-thread
+static __thread int httpd_conn_count;
 
 /* The connection states. */
 #define CNST_FREE 0
@@ -169,6 +172,8 @@ static void show_stats( ClientData client_data, struct timeval* nowP );
 #endif /* STATS_TIME */
 static void logstats( struct timeval* nowP );
 static void thttpd_logstats( long secs );
+
+static void *web_thread(void *args);
 
 
 /* SIGTERM and SIGINT say to exit immediately. */
@@ -733,6 +738,17 @@ main( int argc, char** argv )
     num_connects = 0;
     httpd_conn_count = 0;
 
+    pthread_t pt1, pt2;
+    int r = pthread_create(&pt1, NULL, web_thread, NULL);
+    int r2 = pthread_create(&pt2, NULL, web_thread, NULL);
+    if (r != 0 || r2 != 0) {
+      perror("pthread_create failed");
+      exit(1);
+    }
+
+    while(1) sleep(1000);
+
+#if 0
     if ( hs != (httpd_server*) 0 )
         {
         if ( hs->listen4_fd != -1 )
@@ -740,6 +756,7 @@ main( int argc, char** argv )
         if ( hs->listen6_fd != -1 )
             fdwatch_add_fd( hs->listen6_fd, (void*) 0, FDW_READ );
         }
+
 
     /* Main loop. */
     (void) gettimeofday( &tv, (struct timezone*) 0 );
@@ -824,6 +841,7 @@ main( int argc, char** argv )
                 }
             }
         }
+#endif
 
     /* The main loop terminated. */
     shut_down();
@@ -832,6 +850,126 @@ main( int argc, char** argv )
     exit( 0 );
     }
 
+static void *web_thread(void *args) {
+    int num_ready;
+    connecttab *c;
+    httpd_conn *hc;
+    int cnum;
+    struct timeval tv;
+
+    // have to call this per thread
+    fdwatch_get_nfiles();
+
+    /* Initialize our connections table. */
+    connects = NEW( connecttab, max_connects );
+    if ( connects == (connecttab*) 0 )
+      {
+        syslog( LOG_CRIT, "out of memory allocating a connecttab" );
+        exit( 1 );
+      }
+    for ( cnum = 0; cnum < max_connects; ++cnum )
+      {
+        connects[cnum].conn_state = CNST_FREE;
+        connects[cnum].next_free_connect = cnum + 1;
+        connects[cnum].hc = (httpd_conn*) 0;
+      }
+    connects[max_connects - 1].next_free_connect = -1;        /* end of link list */
+    first_free_connect = 0;
+    num_connects = 0;
+    httpd_conn_count = 0;
+
+    if ( hs != (httpd_server*) 0 )
+      {
+        if ( hs->listen4_fd != -1 )
+          fdwatch_add_fd( hs->listen4_fd, (void*) 0, FDW_READ );
+        if ( hs->listen6_fd != -1 )
+          fdwatch_add_fd( hs->listen6_fd, (void*) 0, FDW_READ );
+      }
+
+    (void) gettimeofday( &tv, (struct timezone*) 0 );
+    while ( ( ! terminate ) || num_connects > 0 )
+      {
+        /* Do we need to re-open the log file? */
+        if ( got_hup )
+          {
+            re_open_logfile();
+            got_hup = 0;
+          }
+
+        /* Do the fd watch. */
+        num_ready = fdwatch( tmr_mstimeout( &tv ) );
+        if ( num_ready < 0 )
+          {
+            if ( errno == EINTR || errno == EAGAIN )
+              continue;       /* try again */
+            syslog( LOG_ERR, "fdwatch - %m" );
+            exit( 1 );
+          }
+        (void) gettimeofday( &tv, (struct timezone*) 0 );
+
+        if ( num_ready == 0 )
+          {
+            /* No fd's are ready - run the timers. */
+            tmr_run( &tv );
+            continue;
+          }
+
+        /* Is it a new connection? */
+        if ( hs != (httpd_server*) 0 && hs->listen6_fd != -1 &&
+             fdwatch_check_fd( hs->listen6_fd ) )
+          {
+            if ( handle_newconnect( &tv, hs->listen6_fd ) )
+              /* Go around the loop and do another fdwatch, rather than
+              ** dropping through and processing existing connections.
+              ** New connections always get priority.
+              */
+              continue;
+          }
+        if ( hs != (httpd_server*) 0 && hs->listen4_fd != -1 &&
+             fdwatch_check_fd( hs->listen4_fd ) )
+          {
+            if ( handle_newconnect( &tv, hs->listen4_fd ) )
+              /* Go around the loop and do another fdwatch, rather than
+              ** dropping through and processing existing connections.
+              ** New connections always get priority.
+              */
+              continue;
+          }
+
+        /* Find the connections that need servicing. */
+        while ( ( c = (connecttab*) fdwatch_get_next_client_data() ) != (connecttab*) -1 )
+          {
+            if ( c == (connecttab*) 0 )
+              continue;
+            hc = c->hc;
+            if ( ! fdwatch_check_fd( hc->conn_fd ) )
+              /* Something went wrong. */
+              clear_connection( c, &tv );
+            else
+              switch ( c->conn_state )
+                {
+                case CNST_READING: handle_read( c, &tv ); break;
+                case CNST_SENDING: handle_send( c, &tv ); break;
+                case CNST_LINGERING: handle_linger( c, &tv ); break;
+                }
+          }
+        tmr_run( &tv );
+
+        if ( got_usr1 && ! terminate )
+          {
+            terminate = 1;
+            if ( hs != (httpd_server*) 0 )
+              {
+                if ( hs->listen4_fd != -1 )
+                  fdwatch_del_fd( hs->listen4_fd );
+                if ( hs->listen6_fd != -1 )
+                  fdwatch_del_fd( hs->listen6_fd );
+                httpd_unlisten( hs );
+              }
+          }
+      }
+    return NULL;
+}
 
 static void
 parse_args( int argc, char** argv )
