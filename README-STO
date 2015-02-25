@@ -4,8 +4,9 @@ You may need to run ./configure again (I ran it on OS X).
 Then just run `make`
 
 To run thttpd:
-sudo ./thttpd
+sudo ./thttpd -h 127.0.0.1
 To run in the foreground:
-sudo ./thttpd -D
+sudo ./thttpd -D -h 127.0.0.1
 
 You can test it by going to http://127.0.0.1
+or by running something like `ab -n1000 -c100 http://127.0.0.1` (1000 requests, 100 at a time)

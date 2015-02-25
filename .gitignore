@@ -1,3 +1,13 @@
 *~
 \#*\#
+.\#.gitignore
 *.o
+
+phf
+redirect
+ssi
+htpasswd
+makeweb
+thttpd
+mime_encodings.h
+mime_types.h
