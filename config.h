@@ -167,12 +167,12 @@
 ** In any case, if thttpd is started with the -h flag, that name always
 ** gets used.
 */
-#ifdef notdef
-#define SERVER_NAME "localhost"
-#define SERVER_NAME_LIST \
-    "canonical.name.here/alternate.name.here", \
-    "canonical.name.two/alternate.name.two"
-#endif
+//#ifdef notdef
+#define SERVER_NAME "127.0.0.1"
+//#define SERVER_NAME_LIST                     \
+//    "canonical.name.here/alternate.name.here",    \
+//    "canonical.name.two/alternate.name.two"
+//#endif
 
 /* CONFIGURE: Undefine this if you want thttpd to hide its specific version
 ** when returning into to browsers.  Instead it'll just say "thttpd" with

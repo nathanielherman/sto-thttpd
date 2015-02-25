@@ -1,5 +1,9 @@
 Notes to me/anyone else:
+
+You may need to run ./configure again (I ran it on OS X).
+Then just run `make`
+
 To run thttpd:
-sudo ./thttpd -h 127.0.0.1
+sudo ./thttpd
 To run in the foreground:
-sudo ./thttpd -h 127.0.0.1 -D
+sudo ./thttpd -D
