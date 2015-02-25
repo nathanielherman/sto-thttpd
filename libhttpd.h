@@ -121,8 +121,8 @@ typedef struct {
     char* remoteuser;
     char* response;
     size_t maxdecodedurl, maxorigfilename, maxexpnfilename, maxencodings,
-	maxpathinfo, maxquery, maxaccept, maxaccepte, maxreqhost, maxhostdir,
-	maxremoteuser, maxresponse;
+        maxpathinfo, maxquery, maxaccept, maxaccepte, maxreqhost, maxhostdir,
+        maxremoteuser, maxresponse;
 #ifdef TILDE_MAP_2
     char* altdir;
     size_t maxaltdir;
