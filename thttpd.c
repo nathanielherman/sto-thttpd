@@ -668,6 +668,8 @@ main( int argc, char** argv )
     if ( numthrottles > 0 )
         {
         /* Set up the throttles timer. */
+          // XXX: they do throttles by running a timer every so often. Question is should we do per-thread timers 
+          // or one timer and then have the timer thread be able to read each thread's connection data
         if ( tmr_create( (struct timeval*) 0, update_throttles, JunkClientData, THROTTLE_TIME * 1000L, 1 ) == (Timer*) 0 )
             {
             syslog( LOG_CRIT, "tmr_create(update_throttles) failed" );
@@ -1698,6 +1700,7 @@ handle_newconnect( struct timeval* tvP, int listen_fd )
         /* Pop it off the free list. */
         first_free_connect = c->next_free_connect;
         c->next_free_connect = -1;
+        // XXX: should this be transact?
         ++num_connects;
         client_data.p = c;
         c->active_at = tvP->tv_sec;
@@ -1711,6 +1714,7 @@ handle_newconnect( struct timeval* tvP, int listen_fd )
 
         fdwatch_add_fd( c->hc->conn_fd, c, FDW_READ );
 
+        // XXX: transact
         ++stats_connections;
         if ( num_connects > stats_simultaneous )
             stats_simultaneous = num_connects;
@@ -1816,6 +1820,7 @@ handle_read( connecttab* c, struct timeval* tvP )
         {
         /* No file address means someone else is handling it. */
         int tind;
+        // XXX: TXN
         for ( tind = 0; tind < c->numtnums; ++tind )
             throttles[c->tnums[tind]].bytes_since_avg += hc->bytes_sent;
         c->next_byte_index = hc->bytes_sent;
@@ -1952,6 +1957,7 @@ handle_send( connecttab* c, struct timeval* tvP )
     /* And update how much of the file we wrote. */
     c->next_byte_index += sz;
     c->hc->bytes_sent += sz;
+    // XXX: TXN
     for ( tind = 0; tind < c->numtnums; ++tind )
         throttles[c->tnums[tind]].bytes_since_avg += sz;
 
@@ -2039,6 +2045,7 @@ check_throttles( connecttab* c )
                 throttles[tnum].num_sending = 0;
                 }
             c->tnums[c->numtnums++] = tnum;
+            // XXX: TXN
             ++throttles[tnum].num_sending;
             l = throttles[tnum].max_limit / throttles[tnum].num_sending;
             if ( c->max_limit == THROTTLE_NOLIMIT )
@@ -2061,6 +2068,7 @@ clear_throttles( connecttab* c, struct timeval* tvP )
     int tind;
 
     for ( tind = 0; tind < c->numtnums; ++tind )
+      // XXX: TXN
         --throttles[c->tnums[tind]].num_sending;
     }
 
@@ -2076,6 +2084,7 @@ update_throttles( ClientData client_data, struct timeval* nowP )
     /* Update the average sending rate for each throttle.  This is only used
     ** when new connections start up.
     */
+    // XXX: TXN
     for ( tnum = 0; tnum < numthrottles; ++tnum )
         {
         throttles[tnum].rate = ( 2 * throttles[tnum].rate + throttles[tnum].bytes_since_avg / THROTTLE_TIME ) / 3;
@@ -2183,6 +2192,7 @@ clear_connection( connecttab* c, struct timeval* tvP )
 static void
 really_clear_connection( connecttab* c, struct timeval* tvP )
     {
+      // XXX: TXN
     stats_bytes += c->hc->bytes_sent;
     if ( c->conn_state != CNST_PAUSING )
         fdwatch_del_fd( c->hc->conn_fd );
