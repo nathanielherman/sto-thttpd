@@ -1,0 +1,3 @@
+[submodule "sto"]
+	path = sto
+	url = git@github.com:nathanielherman/sto.git
