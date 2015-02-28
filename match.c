@@ -37,16 +37,16 @@ static int match_one( const char* pattern, int patternlen, const char* string );
 int
 match( const char* pattern, const char* string )
     {
-    const char* or;
+    const char* o;
 
     for (;;)
         {
-        or = strchr( pattern, '|' );
-        if ( or == (char*) 0 )
+        o = strchr( pattern, '|' );
+        if ( o == (char*) 0 )
             return match_one( pattern, strlen( pattern ), string );
-        if ( match_one( pattern, or - pattern, string ) )
+        if ( match_one( pattern, o - pattern, string ) )
             return 1;
-        pattern = or + 1;
+        pattern = o + 1;
         }
     }
 

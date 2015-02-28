@@ -2946,7 +2946,7 @@ mode  links    bytes  last-changed  name\n\
                     case S_IFSOCK: fileclass = "="; break;
                     case S_IFLNK:  fileclass = "@"; break;
                     default:
-                    fileclass = ( sb.st_mode & S_IXOTH ) ? "*" : "";
+                    fileclass = (char*)(( sb.st_mode & S_IXOTH ) ? "*" : "");
                     break;
                     }
 
@@ -3080,8 +3080,9 @@ make_envp( httpd_conn* hc )
             }
         }
     envp[envn++] = build_env(
-        "SCRIPT_NAME=/%s", strcmp( hc->origfilename, "." ) == 0 ?
-        "" : hc->origfilename );
+                             "SCRIPT_NAME=/%s", 
+                             (char*)(strcmp( hc->origfilename, "." ) == 0 ?
+                                     "" : hc->origfilename) );
     if ( hc->query[0] != '\0')
         envp[envn++] = build_env( "QUERY_STRING=%s", hc->query );
     envp[envn++] = build_env(
@@ -3877,7 +3878,7 @@ really_start_request( httpd_conn* hc, struct timeval* nowP )
         }
     else
         {
-        hc->file_address = mmc_map( hc->expnfilename, &(hc->sb), nowP );
+        hc->file_address = (char*)mmc_map( hc->expnfilename, &(hc->sb), nowP );
         if ( hc->file_address == (char*) 0 )
             {
             httpd_send_err( hc, 500, err500title, "", err500form, hc->encodedurl );
