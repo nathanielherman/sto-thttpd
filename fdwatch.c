@@ -77,7 +77,7 @@ static __thread void** fd_data;
 static __thread int nreturned, next_ridx;
 
 #ifdef HAVE_KQUEUE
-
+#error "kqueue not supported by sto-thttpd currently"
 #define WHICH                  "kevent"
 #define INIT( nf )         kqueue_init( nf )
 #define ADD_FD( fd, rw )       kqueue_add_fd( fd, rw )
@@ -95,7 +95,7 @@ static int kqueue_get_fd( int ridx );
 
 #else /* HAVE_KQUEUE */
 # ifdef HAVE_DEVPOLL
-
+#error "devpoll not supported by sto-thttpd currently"
 #define WHICH                  "devpoll"
 #define INIT( nf )         devpoll_init( nf )
 #define ADD_FD( fd, rw )       devpoll_add_fd( fd, rw )
@@ -131,7 +131,7 @@ static int poll_get_fd( int ridx );
 
 #  else /* HAVE_POLL */
 #   ifdef HAVE_SELECT
-
+#error "select not supported by sto-thttpd currently"
 #define WHICH                  "select"
 #define INIT( nf )         select_init( nf )
 #define ADD_FD( fd, rw )       select_add_fd( fd, rw )

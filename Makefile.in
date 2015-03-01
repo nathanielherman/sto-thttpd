@@ -46,11 +46,12 @@ CGIBINDIR =	$(WEBDIR)/cgi-bin
 
 # You shouldn't need to edit anything below here.
 
-CC =		@CC@
+CC =	 	$(CXX) #@CC@
+CXX = 		@CXX@
 CCOPT =		@V_CCOPT@
-DEFS =		@DEFS@
+DEFS =		@DEFS@ -UHAVE_KQUEUE -UHAVE_DEVPOLL
 INCLS =		-I.
-CFLAGS =	$(CCOPT) $(DEFS) $(INCLS)
+CFLAGS =	$(CCOPT) $(DEFS) $(INCLS) -g
 LDFLAGS =	@LDFLAGS@
 LIBS =		@LIBS@
 NETLIBS =	@V_NETLIBS@
@@ -64,7 +65,7 @@ INSTALL =	@INSTALL@
 
 SRC =		thttpd.c libhttpd.c fdwatch.c mmc.c timers.c match.c tdate_parse.c
 
-OBJ =		$(SRC:.c=.o) @LIBOBJS@
+OBJ =		$(SRC:.c=.o) @LIBOBJS@ sto/Transaction.o
 
 ALL =		thttpd
 

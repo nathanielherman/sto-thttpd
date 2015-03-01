@@ -30,7 +30,8 @@ WEBDIR =	$(prefix)/www
 CGIBINDIR =	$(WEBDIR)/cgi-bin
 MANDIR =	@mandir@
 
-CC =		@CC@
+CC =		$(CXX)
+CXX =		@CXX@
 CCOPT =		@V_CCOPT@
 DEFS =		@DEFS@
 INCLS =		-I..
