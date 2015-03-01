@@ -37,6 +37,8 @@
 #include <sys/uio.h>
 
 #include <pthread.h>
+#include "sto/tm.h"
+#include "sto/Array_Sized.hh"
 
 #include <errno.h>
 #ifdef HAVE_FCNTL_H
@@ -101,8 +103,13 @@ typedef struct {
     off_t bytes_since_avg;
     int num_sending;
     } throttletab;
-static throttletab* throttles;
+typedef Array_Sized<throttletab> ArrayType;
+static ArrayType throttles;
 static int numthrottles, maxthrottles;
+
+#define ARR_READ(arr, i) (arr.transRead(TM_ARG i))
+#define ARR_WRITE(arr, i, field, val) ({ auto tt = arr.transRead(TM_ARG i); tt.field = val; arr.transWrite(TM_ARG i, tt); })
+#define ARR_INCR(arr, i, field, val) ({ auto tt = arr.transRead(TM_ARG i); tt.field += val; arr.transWrite(TM_ARG i, tt); })
 
 #define THROTTLE_NOLIMIT -1
 
@@ -403,7 +410,7 @@ main( int argc, char** argv )
     /* Throttle file. */
     numthrottles = 0;
     maxthrottles = 0;
-    throttles = (throttletab*) 0;
+    //    throttles = (throttletab*) 0;
     if ( throttlefile != (char*) 0 )
         read_throttlefile( throttlefile );
 
@@ -1570,13 +1577,14 @@ read_throttlefile( char* tf )
             if ( maxthrottles == 0 )
                 {
                 maxthrottles = 100;     /* arbitrary */
-                throttles = NEW( throttletab, maxthrottles );
+                throttles = ArrayType(maxthrottles);//NEW( throttletab, maxthrottles );
                 }
             else
                 {
                 maxthrottles *= 2;
-                throttles = RENEW( throttles, throttletab, maxthrottles );
+                throttles = ArrayType(maxthrottles);//RENEW( throttles, throttletab, maxthrottles );
                 }
+#if 0
             if ( throttles == (throttletab*) 0 )
                 {
                 syslog( LOG_CRIT, "out of memory allocating a throttletab" );
@@ -1585,6 +1593,7 @@ read_throttlefile( char* tf )
                     argv0 );
                 exit( 1 );
                 }
+#endif
             }
 
         /* Add to table. */
@@ -1634,8 +1643,8 @@ shut_down( void )
     mmc_term();
     tmr_term();
     free( (void*) connects );
-    if ( throttles != (throttletab*) 0 )
-        free( (void*) throttles );
+    //    if ( throttles != (throttletab*) 0 )
+    //  free( (void*) throttles );
     }
 
 
@@ -1821,8 +1830,10 @@ handle_read( connecttab* c, struct timeval* tvP )
         /* No file address means someone else is handling it. */
         int tind;
         // XXX: TXN
+        TM_BEGIN();
         for ( tind = 0; tind < c->numtnums; ++tind )
-            throttles[c->tnums[tind]].bytes_since_avg += hc->bytes_sent;
+          ARR_INCR(throttles, c->tnums[tind], bytes_since_avg, hc->bytes_sent);
+        TM_END();
         c->next_byte_index = hc->bytes_sent;
         finish_connection( c, tvP );
         return;
@@ -1958,8 +1969,10 @@ handle_send( connecttab* c, struct timeval* tvP )
     c->next_byte_index += sz;
     c->hc->bytes_sent += sz;
     // XXX: TXN
+    TM_BEGIN();
     for ( tind = 0; tind < c->numtnums; ++tind )
-        throttles[c->tnums[tind]].bytes_since_avg += sz;
+      ARR_INCR(throttles, c->tnums[tind], bytes_since_avg, sz);
+    TM_END();
 
     /* Are we done? */
     if ( c->next_byte_index >= c->end_byte_index )
@@ -2046,17 +2059,20 @@ check_throttles( connecttab* c )
                 }
             c->tnums[c->numtnums++] = tnum;
             // XXX: TXN
-            ++throttles[tnum].num_sending;
-            l = throttles[tnum].max_limit / throttles[tnum].num_sending;
+            long minl;
+            TM_BEGIN();
+            ARR_INCR(throttles, tnum, num_sending, 1);
+            l = ARR_READ(throttles, tnum).max_limit / ARR_READ(throttles, tnum).num_sending;
+            minl = ARR_READ(throttles, tnum).min_limit;
+            TM_END();
             if ( c->max_limit == THROTTLE_NOLIMIT )
                 c->max_limit = l;
             else
                 c->max_limit = MIN( c->max_limit, l );
-            l = throttles[tnum].min_limit;
             if ( c->min_limit == THROTTLE_NOLIMIT )
-                c->min_limit = l;
+                c->min_limit = minl;
             else
-                c->min_limit = MAX( c->min_limit, l );
+                c->min_limit = MAX( c->min_limit, minl );
             }
     return 1;
     }
@@ -2067,9 +2083,11 @@ clear_throttles( connecttab* c, struct timeval* tvP )
     {
     int tind;
 
+    TM_BEGIN();
     for ( tind = 0; tind < c->numtnums; ++tind )
       // XXX: TXN
-        --throttles[c->tnums[tind]].num_sending;
+      ARR_INCR(throttles, c->tnums[tind], num_sending, -1);
+    TM_END();
     }
 
 
@@ -2087,8 +2105,14 @@ update_throttles( ClientData client_data, struct timeval* nowP )
     // XXX: TXN
     for ( tnum = 0; tnum < numthrottles; ++tnum )
         {
+        // TODO: this actually probably doesn't require a transaction. we're the only thread that updates .rate
+        // so there's no contention there. bytes_since_avg is contended however we're just doing a single read,
+        // followed by a blind write. seems like at most we need a transactional blind write to invalidate
+        // any concurrent increments of that value
         throttles[tnum].rate = ( 2 * throttles[tnum].rate + throttles[tnum].bytes_since_avg / THROTTLE_TIME ) / 3;
-        throttles[tnum].bytes_since_avg = 0;
+        TM_BEGIN();
+        ARR_WRITE(throttles, tnum, bytes_since_avg, 0);
+        TM_END();
         /* Log a warning message if necessary. */
         if ( throttles[tnum].rate > throttles[tnum].max_limit && throttles[tnum].num_sending != 0 )
             {
@@ -2193,7 +2217,8 @@ static void
 really_clear_connection( connecttab* c, struct timeval* tvP )
     {
       // XXX: TXN
-    stats_bytes += c->hc->bytes_sent;
+    __sync_add_and_fetch(&stats_bytes, c->hc->bytes_sent);
+    //stats_bytes += c->hc->bytes_sent;
     if ( c->conn_state != CNST_PAUSING )
         fdwatch_del_fd( c->hc->conn_fd );
     httpd_close_conn( c->hc, tvP );

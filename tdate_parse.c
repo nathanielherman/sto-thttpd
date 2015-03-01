@@ -44,7 +44,7 @@
 
 
 struct strlong {
-    char* s;
+    const char* s;
     long l;
     };
 

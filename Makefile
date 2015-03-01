@@ -65,7 +65,7 @@ INSTALL =	/usr/bin/install -c
 
 SRC =		thttpd.c libhttpd.c fdwatch.c mmc.c timers.c match.c tdate_parse.c
 
-OBJ =		$(SRC:.c=.o) 
+OBJ =		$(SRC:.c=.o) sto/Transaction.o
 
 ALL =		thttpd
 
