@@ -132,7 +132,7 @@ typedef struct {
 static __thread connecttab* connects;
 static __thread int num_connects, first_free_connect;
 static int max_connects; // constant, so not per-thread
-static __thread int httpd_conn_count;
+static int httpd_conn_count;
 
 /* The connection states. */
 #define CNST_FREE 0
@@ -176,6 +176,7 @@ static void idle( ClientData client_data, struct timeval* nowP );
 static void wakeup_connection( ClientData client_data, struct timeval* nowP );
 static void linger_clear_connection( ClientData client_data, struct timeval* nowP );
 static void occasional( ClientData client_data, struct timeval* nowP );
+static void occasional_thread( ClientData client_data, struct timeval* nowP );
 #ifdef STATS_TIME
 static void show_stats( ClientData client_data, struct timeval* nowP );
 #endif /* STATS_TIME */
@@ -666,17 +667,9 @@ main( int argc, char** argv )
         syslog( LOG_CRIT, "tmr_create(occasional) failed" );
         exit( 1 );
         }
-    /* Set up the idle timer. */
-    if ( tmr_create( (struct timeval*) 0, idle, JunkClientData, 5 * 1000L, 1 ) == (Timer*) 0 )
-        {
-        syslog( LOG_CRIT, "tmr_create(idle) failed" );
-        exit( 1 );
-        }
     if ( numthrottles > 0 )
         {
         /* Set up the throttles timer. */
-          // XXX: they do throttles by running a timer every so often. Question is should we do per-thread timers 
-          // or one timer and then have the timer thread be able to read each thread's connection data
         if ( tmr_create( (struct timeval*) 0, update_throttles, JunkClientData, THROTTLE_TIME * 1000L, 1 ) == (Timer*) 0 )
             {
             syslog( LOG_CRIT, "tmr_create(update_throttles) failed" );
@@ -731,7 +724,7 @@ main( int argc, char** argv )
                 "started as root without requesting chroot(), warning only" );
         }
 
-#if THREADS
+#ifdef THREADS
 
     pthread_t pt1, pt2;
     int r = pthread_create(&pt1, NULL, web_thread, NULL);
@@ -741,7 +734,12 @@ main( int argc, char** argv )
       exit(1);
     }
 
-    while(1) sleep(1000);
+    while(1) {
+      // main thread runs timers too, to cleanup mmap stuff and log stats
+      sleep(MIN(THROTTLE_TIME, OCCASIONAL_TIME));
+      (void) gettimeofday( &tv, (struct timezone*) 0 );
+      tmr_run(&tv);
+    }
 
 
 #else
@@ -873,8 +871,25 @@ static void *web_thread(void *args) {
     int cnum;
     struct timeval tv;
 
-    // have to call this per thread
+    /* Initialize the timer package (per-thread) */
+    tmr_init();
+
+    // this initializes per-thread file descriptor arrays
     fdwatch_get_nfiles();
+
+    /* Set up the "occasional" timer. */
+    if ( tmr_create( (struct timeval*) 0, occasional_thread, JunkClientData, OCCASIONAL_TIME * 1000L, 1 ) == (Timer*) 0 )
+      {
+        syslog( LOG_CRIT, "tmr_create(occasional) failed" );
+        exit( 1 );
+      }
+
+    /* Set up the "idle" timer. */
+    if ( tmr_create( (struct timeval*) 0, idle, JunkClientData, 5 * 1000L, 1 ) == (Timer*) 0 )
+        {
+        syslog( LOG_CRIT, "tmr_create(idle) failed" );
+        exit( 1 );
+        }
 
     /* Initialize our connections table. */
     connects = NEW( connecttab, max_connects );
@@ -1866,6 +1881,22 @@ handle_send( connecttab* c, struct timeval* tvP )
     httpd_conn* hc = c->hc;
     int tind;
 
+    /* Update the sending rate on this connection */
+    c->max_limit = THROTTLE_NOLIMIT;
+    for ( long tind = 0; tind < c->numtnums; ++tind )
+      {
+        long tnum = c->tnums[tind];
+        long l;
+        TM_BEGIN();
+        l = ARR_READ(throttles,tnum).max_limit / ARR_READ(throttles,tnum).num_sending;
+        TM_END();
+        if ( c->max_limit == THROTTLE_NOLIMIT )
+          c->max_limit = l;
+        else
+          c->max_limit = MIN( c->max_limit, l );
+      }
+
+
     if ( c->max_limit == THROTTLE_NOLIMIT )
         max_bytes = 1000000000L;
     else
@@ -2127,6 +2158,8 @@ update_throttles( ClientData client_data, struct timeval* nowP )
             }
         }
 
+#if 0
+// NOTE: we do this per-thread now! (in handle_send)
     /* Now update the sending rate on all the currently-sending connections,
     ** redistributing it evenly.
     */
@@ -2147,6 +2180,7 @@ update_throttles( ClientData client_data, struct timeval* nowP )
                 }
             }
         }
+#endif
     }
 
 
@@ -2296,15 +2330,23 @@ linger_clear_connection( ClientData client_data, struct timeval* nowP )
     really_clear_connection( c, nowP );
     }
 
+// per-thread cleanup work
+static void
+occasional_thread( ClientData client_data, struct timeval* nowP )
+    {
+    // each thread has to cleanup its timers occasionally
+    tmr_cleanup();
+    }
 
+// called only on the main thread; for global cleanup work
 static void
 occasional( ClientData client_data, struct timeval* nowP )
     {
     mmc_cleanup( nowP );
-    tmr_cleanup();
     watchdog_flag = 1;                /* let the watchdog know that we are alive */
+    // main thread technically has no timers to cleanup but could in the future
+    occasional_thread(client_data, nowP);
     }
-
 
 #ifdef STATS_TIME
 static void

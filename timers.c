@@ -35,9 +35,9 @@
 
 
 #define HASH_SIZE 67
-static Timer* timers[HASH_SIZE];
-static Timer* free_timers;
-static int alloc_count, active_count, free_count;
+static __thread Timer* timers[HASH_SIZE];
+static __thread Timer* free_timers;
+static __thread int alloc_count, active_count, free_count;
 
 ClientData JunkClientData;
 
