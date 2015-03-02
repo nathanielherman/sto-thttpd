@@ -286,7 +286,7 @@
 
 /* CONFIGURE: How often to run the occasional cleanup job.
 */
-#define OCCASIONAL_TIME 120
+#define OCCASIONAL_TIME 20
 
 /* CONFIGURE: Seconds between stats syslogs.  If this is undefined then
 ** no stats are accumulated and no stats syslogs are done.

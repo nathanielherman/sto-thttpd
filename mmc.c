@@ -55,7 +55,7 @@ typedef long long int64_t;
 
 /* Defines. */
 #ifndef DEFAULT_EXPIRE_AGE
-#define DEFAULT_EXPIRE_AGE 600
+#define DEFAULT_EXPIRE_AGE 10
 #endif
 #ifndef DESIRED_FREE_COUNT
 #define DESIRED_FREE_COUNT 100
@@ -185,6 +185,7 @@ mmc_map( char* filename, struct stat* sbP, struct timeval* nowP )
       // nicely in an atomic{} block, for instance.
       // what sort of syntax could support this nicely??
       TM_ARG_ALONE.commit();
+      syslog(LOG_NOTICE, "Got %s from the hashtable", filename);
       return val.addr;
     }
 
@@ -264,6 +265,8 @@ mmc_map( char* filename, struct stat* sbP, struct timeval* nowP )
 
     TM_END();
 
+    syslog(LOG_NOTICE, "inserted mmap entry for %s", filename);
+
     /* Update the total byte count. */
     __sync_add_and_fetch(&mapped_bytes, sb.st_size);
 
@@ -318,10 +321,11 @@ mmc_cleanup( struct timeval* nowP )
 
     /* Really unmap any unreferenced entries older than the age limit. */
     auto end = hashtable.end();
-    for (auto it = hashtable.begin(); it != end; ++it) {
+    for (auto it = hashtable.begin(); it != end; ) {
       auto pair = *it;
       MapKey key = pair.first;
       MapVal val = pair.second;
+      ++it;
       // approximate
       if (val.refcount == 0 && now - val.reftime >= expire_age) {
         bool removed;
@@ -338,8 +342,6 @@ mmc_cleanup( struct timeval* nowP )
         if (removed) {
           really_unmap(key, val);
         }
-        // TODO: after commit this node might be deallocated, so
-        // it's not really safe to just keep iterating from there...
       }
     }
 
@@ -363,10 +365,11 @@ panic( void )
 
     /* Really unmap all unreferenced entries. */
     auto end = hashtable.end();
-    for (auto it = hashtable.begin(); it != end; ++it) {
+    for (auto it = hashtable.begin(); it != end; ) {
       auto pair = *it;
       MapKey key = pair.first;
       MapVal val = pair.second;
+      ++it;
       // approximate
       if (val.refcount == 0) {
         bool removed;
@@ -383,8 +386,6 @@ panic( void )
         if (removed) {
           really_unmap(key, val);
         }
-        // TODO: after commit this node might be deallocated, so
-        // it's not really safe to just keep iterating from there...
       }
     }
 

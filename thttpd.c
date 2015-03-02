@@ -318,6 +318,8 @@ handle_usr2( int sig )
 static void
 handle_alrm( int sig )
     {
+      // XXX: disable alrm for debuggin
+      return;
     const int oerrno = errno;
 
     /* If nothing has been happening */
