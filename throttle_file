@@ -1,0 +1,9 @@
+# example throttle file
+
+**              400  # max N bytes per second
+                             
+# maximum of N bytes per second, 
+# minimum of M bytes per second, meaning don't start new connections
+# if we're doing less than M bytes/s
+**.jpg|**.gif   1000-50000        
+jef/**          20000
