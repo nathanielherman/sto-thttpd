@@ -728,12 +728,15 @@ main( int argc, char** argv )
 
 #ifdef THREADS
 
-    pthread_t pt1, pt2;
-    int r = pthread_create(&pt1, NULL, web_thread, NULL);
-    int r2 = pthread_create(&pt2, NULL, web_thread, NULL);
-    if (r != 0 || r2 != 0) {
-      perror("pthread_create failed");
-      exit(1);
+#define NTHREADS 4
+
+    for (int i = 0; i < NTHREADS; ++i) {
+      pthread_t pt;
+      int r = pthread_create(&pt1, NULL, web_thread, NULL);
+      if (r != 0) {
+        perror("pthread_create failed");
+        exit(1);
+      }
     }
 
     while(1) {
