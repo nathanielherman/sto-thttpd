@@ -72,9 +72,6 @@
 typedef long long int64_t;
 #endif
 
-// TODO: put this in the Makefile
-#define THREADS 1
-
 static char* argv0;
 static int debug;
 static unsigned short port;
@@ -726,8 +723,6 @@ main( int argc, char** argv )
                 "started as root without requesting chroot(), warning only" );
         }
 
-#ifdef THREADS
-
 #define NTHREADS 4
 
     for (int i = 0; i < NTHREADS; ++i) {
@@ -745,122 +740,6 @@ main( int argc, char** argv )
       (void) gettimeofday( &tv, (struct timezone*) 0 );
       tmr_run(&tv);
     }
-
-
-#else
-
-    /* Initialize our connections table. */
-    connects = NEW( connecttab, max_connects );
-    if ( connects == (connecttab*) 0 )
-        {
-        syslog( LOG_CRIT, "out of memory allocating a connecttab" );
-        exit( 1 );
-        }
-    for ( cnum = 0; cnum < max_connects; ++cnum )
-        {
-        connects[cnum].conn_state = CNST_FREE;
-        connects[cnum].next_free_connect = cnum + 1;
-        connects[cnum].hc = (httpd_conn*) 0;
-        }
-    connects[max_connects - 1].next_free_connect = -1;        /* end of link list */
-    first_free_connect = 0;
-    num_connects = 0;
-    httpd_conn_count = 0;
-
-
-    if ( hs != (httpd_server*) 0 )
-        {
-        if ( hs->listen4_fd != -1 )
-            fdwatch_add_fd( hs->listen4_fd, (void*) 0, FDW_READ );
-        if ( hs->listen6_fd != -1 )
-            fdwatch_add_fd( hs->listen6_fd, (void*) 0, FDW_READ );
-        }
-
-
-    /* Main loop. */
-    (void) gettimeofday( &tv, (struct timezone*) 0 );
-    while ( ( ! terminate ) || num_connects > 0 )
-        {
-        /* Do we need to re-open the log file? */
-        if ( got_hup )
-            {
-            re_open_logfile();
-            got_hup = 0;
-            }
-
-        /* Do the fd watch. */
-        num_ready = fdwatch( tmr_mstimeout( &tv ) );
-        if ( num_ready < 0 )
-            {
-            if ( errno == EINTR || errno == EAGAIN )
-                continue;       /* try again */
-            syslog( LOG_ERR, "fdwatch - %m" );
-            exit( 1 );
-            }
-        (void) gettimeofday( &tv, (struct timezone*) 0 );
-
-        if ( num_ready == 0 )
-            {
-            /* No fd's are ready - run the timers. */
-            tmr_run( &tv );
-            continue;
-            }
-
-        /* Is it a new connection? */
-        if ( hs != (httpd_server*) 0 && hs->listen6_fd != -1 &&
-             fdwatch_check_fd( hs->listen6_fd ) )
-            {
-            if ( handle_newconnect( &tv, hs->listen6_fd ) )
-                /* Go around the loop and do another fdwatch, rather than
-                ** dropping through and processing existing connections.
-                ** New connections always get priority.
-                */
-                continue;
-            }
-        if ( hs != (httpd_server*) 0 && hs->listen4_fd != -1 &&
-             fdwatch_check_fd( hs->listen4_fd ) )
-            {
-            if ( handle_newconnect( &tv, hs->listen4_fd ) )
-                /* Go around the loop and do another fdwatch, rather than
-                ** dropping through and processing existing connections.
-                ** New connections always get priority.
-                */
-                continue;
-            }
-
-        /* Find the connections that need servicing. */
-        while ( ( c = (connecttab*) fdwatch_get_next_client_data() ) != (connecttab*) -1 )
-            {
-            if ( c == (connecttab*) 0 )
-                continue;
-            hc = c->hc;
-            if ( ! fdwatch_check_fd( hc->conn_fd ) )
-                /* Something went wrong. */
-                clear_connection( c, &tv );
-            else
-                switch ( c->conn_state )
-                    {
-                    case CNST_READING: handle_read( c, &tv ); break;
-                    case CNST_SENDING: handle_send( c, &tv ); break;
-                    case CNST_LINGERING: handle_linger( c, &tv ); break;
-                    }
-            }
-        tmr_run( &tv );
-
-        if ( got_usr1 && ! terminate )
-            {
-            terminate = 1;
-            if ( hs != (httpd_server*) 0 )
-                {
-                if ( hs->listen4_fd != -1 )
-                    fdwatch_del_fd( hs->listen4_fd );
-                if ( hs->listen6_fd != -1 )
-                    fdwatch_del_fd( hs->listen6_fd );
-                httpd_unlisten( hs );
-                }
-            }
-        }
-#endif
 
     /* The main loop terminated. */
     shut_down();
@@ -1604,16 +1483,6 @@ read_throttlefile( char* tf )
                 maxthrottles *= 2;
                 throttles = ArrayType(maxthrottles);//RENEW( throttles, throttletab, maxthrottles );
                 }
-#if 0
-            if ( throttles == (throttletab*) 0 )
-                {
-                syslog( LOG_CRIT, "out of memory allocating a throttletab" );
-                (void) fprintf(
-                    stderr, "%s: out of memory allocating a throttletab\n",
-                    argv0 );
-                exit( 1 );
-                }
-#endif
             }
 
         /* Add to table. */
@@ -2162,30 +2031,6 @@ update_throttles( ClientData client_data, struct timeval* nowP )
             syslog( LOG_NOTICE, "throttle #%d '%.80s' rate %ld lower than minimum %ld; %d sending", tnum, throttles[tnum].pattern, throttles[tnum].rate, throttles[tnum].min_limit, throttles[tnum].num_sending );
             }
         }
-
-#if 0
-// NOTE: we do this per-thread now! (in handle_send)
-    /* Now update the sending rate on all the currently-sending connections,
-    ** redistributing it evenly.
-    */
-    for ( cnum = 0; cnum < max_connects; ++cnum )
-        {
-        c = &connects[cnum];
-        if ( c->conn_state == CNST_SENDING || c->conn_state == CNST_PAUSING )
-            {
-            c->max_limit = THROTTLE_NOLIMIT;
-            for ( tind = 0; tind < c->numtnums; ++tind )
-                {
-                tnum = c->tnums[tind];
-                l = throttles[tnum].max_limit / throttles[tnum].num_sending;
-                if ( c->max_limit == THROTTLE_NOLIMIT )
-                    c->max_limit = l;
-                else
-                    c->max_limit = MIN( c->max_limit, l );
-                }
-            }
-        }
-#endif
     }
 
 
